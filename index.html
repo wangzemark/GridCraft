@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>格子匠 (GridCraft) Pro - 旗舰版</title>
+    <script src="palettes.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root { --primary: #6366f1; --bg: #f1f5f9; --secondary: #10b981; --accent: #f59e0b; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); color: #1e293b; padding: 20px; margin: 0; }
+        .container { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 320px 1fr; gap: 20px; height: calc(100vh - 80px); }
+        .controls { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow-y: auto; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        
+        .btn-group { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; }
+        button { width: 100%; padding: 12px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        .btn-gen { background: var(--primary); }
+        .btn-pdf { background: var(--accent); }
+        .btn-save { background: var(--secondary); }
+        .btn-dl { background: #64748b; }
+        button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+        .preview-area { background: #e2e8f0; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; overflow: hidden; }
+        #canvas-wrapper { flex: 1; display: flex; justify-content: center; align-items: center; overflow: hidden; background: #cbd5e1; border-radius: 8px; border: 2px dashed #94a3b8; margin-bottom: 15px; }
+        canvas { max-width: 100%; max-height: 100%; image-rendering: pixelated; object-fit: contain; background: white; }
+        
+        .palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; max-height: 180px; overflow-y: auto; padding: 5px; }
+        .color-card { background: white; border: 1px solid #ddd; border-radius: 6px; padding: 6px; text-align: center; cursor: pointer; font-size: 11px; }
+        .color-card.active { outline: 3px solid var(--primary); transform: scale(1.05); z-index: 10; }
+        .color-swatch { width: 100%; height: 20px; border-radius: 3px; margin-bottom: 5px; border: 1px solid rgba(0,0,0,0.1); }
+        .code-tag { background: #eee; border-radius: 3px; font-weight: bold; padding: 1px 4px; display: inline-block; margin-bottom: 2px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="controls">
+        <h2 style="margin-top:0">🎨 格子匠 Pro</h2>
+        <div class="input-group">
+            <label>1. 上传图片</label>
+            <input type="file" id="upload" accept="image/*">
+        </div>
+        <div class="input-group">
+            <label>2. 横向格子数</label>
+            <input type="number" id="widthInput" value="50">
+        </div>
+        <div class="input-group">
+            <label>3. 颜色方案</label>
+            <select id="modeSelect">
+                <option value="auto">自动聚类 (K-means)</option>
+                <option value="perler">Perler 拼豆色板 (带色号)</option>
+                <option value="dmc">DMC 绣线色板 (带色号)</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label>4. 颜色数量 (仅自动模式)</label>
+            <input type="number" id="kInput" value="12">
+        </div>
+        
+        <button class="btn-gen" onclick="processImage()">🚀 转换预览</button>
+        
+        <div class="btn-group">
+            <button class="btn-pdf" onclick="exportPDF()">📄 导出 PDF 购物清单</button>
+            <button class="btn-save" onclick="saveImage(true)">💾 另存为图片</button>
+            <button class="btn-dl" onclick="saveImage(false)">📥 快速保存</button>
+        </div>
+    </div>
+
+    <div class="preview-area">
+        <div id="canvas-wrapper">
+            <canvas id="mainCanvas"></canvas>
+        </div>
+        <div class="palette" id="palette"></div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+    let originalImg = null, pixelData = [], finalColors = [], currentW, currentH;
+    const ZOOM = 20;
+
+    document.getElementById('upload').onchange = (e) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => originalImg = img;
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(e.target.files[0]);
+    };
+
+    async function processImage() {
+        if (!originalImg) return alert("请先上传图片");
+        const mode = document.getElementById('modeSelect').value;
+        currentW = parseInt(document.getElementById('widthInput').value);
+        currentH = Math.round(originalImg.height * (currentW / originalImg.width));
+
+        const off = document.createElement('canvas');
+        off.width = currentW; off.height = currentH;
+        const oCtx = off.getContext('2d');
+        oCtx.imageSmoothingEnabled = false;
+        oCtx.drawImage(originalImg, 0, 0, currentW, currentH);
+        
+        const imgData = oCtx.getImageData(0, 0, currentW, currentH);
+        const raw = [];
+        for(let i=0; i<imgData.data.length; i+=4) {
+            raw.push([imgData.data[i], imgData.data[i+1], imgData.data[i+2]]);
+        }
+
+        if (mode === 'auto') {
+            const k = parseInt(document.getElementById('kInput').value);
+            finalColors = kmeans(raw, k);
+        } else {
+            finalColors = PALETTES_LIBRARY[mode];
+        }
+
+        pixelData = raw.map(p => findNearestIndex(p, finalColors));
+        render(null);
+        renderPalette();
+    }
+
+    function render(highIdx) {
+        canvas.width = currentW * ZOOM; canvas.height = currentH * ZOOM;
+        for(let y=0; y<currentH; y++) {
+            for(let x=0; x<currentW; x++) {
+                const i = pixelData[y*currentW + x];
+                const c = finalColors[i];
+                ctx.fillStyle = (highIdx !== null && highIdx !== i) ? `rgba(${c[0]},${c[1]},${c[2]},0.1)` : `rgb(${c[0]},${c[1]},${c[2]})`;
+                ctx.fillRect(x*ZOOM, y*ZOOM, ZOOM, ZOOM);
+                ctx.strokeStyle = "rgba(0,0,0,0.1)";
+                ctx.strokeRect(x*ZOOM, y*ZOOM, ZOOM, ZOOM);
+            }
+        }
+    }
+
+    function renderPalette() {
+        const pal = document.getElementById('palette');
+        pal.innerHTML = '';
+        const used = [...new Set(pixelData)]; // 只显示图片中用到的颜色
+        used.forEach(idx => {
+            const c = finalColors[idx];
+            const cnt = pixelData.filter(v => v === idx).length;
+            const card = document.createElement('div');
+            card.className = 'color-card';
+            // 重点改进：增加了 Code 的显示
+            card.innerHTML = `
+                <div class="color-swatch" style="background:rgb(${c[0]},${c[1]},${c[2]})"></div>
+                ${c[4] ? `<span class="code-tag">${c[4]}</span>` : ''}<br>
+                <span>${c[3] || 'Color '+(idx+1)}</span><br>
+                <small>${cnt} 格</small>
+            `;
+            card.onclick = () => {
+                const active = document.querySelector('.color-card.active');
+                if(active === card) { card.classList.remove('active'); render(null); }
+                else { if(active) active.classList.remove('active'); card.classList.add('active'); render(idx); }
+            };
+            pal.appendChild(card);
+        });
+    }
+
+    async function exportPDF() {
+        if (!currentW) return;
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF();
+        pdf.text("GridCraft Pattern Report", 20, 20);
+        
+        const imgData = canvas.toDataURL("image/png");
+        pdf.addImage(imgData, 'PNG', 20, 30, 170, (170 * currentH / currentW));
+        
+        let yPos = (170 * currentH / currentW) + 50;
+        pdf.setFontSize(14);
+        pdf.text("Materials Checklist (Color Guide):", 20, yPos);
+        yPos += 10;
+        
+        pdf.setFontSize(10);
+        const used = [...new Set(pixelData)];
+        used.forEach((idx) => {
+            const c = finalColors[idx];
+            const cnt = pixelData.filter(v => v === idx).length;
+            pdf.setFillColor(c[0], c[1], c[2]);
+            pdf.rect(20, yPos - 4, 5, 5, 'F');
+            // 重点改进：PDF 导出也包含 Code
+            const colorName = c[3] || 'Auto Color '+(idx+1);
+            const colorCode = c[4] ? `[${c[4]}] ` : '';
+            pdf.text(`${colorCode}${colorName}: ${cnt} units`, 30, yPos);
+            yPos += 7;
+            if(yPos > 280) { pdf.addPage(); yPos = 20; }
+        });
+        pdf.save("GridCraft_Pattern.pdf");
+    }
+
+    async function saveImage(isAs) {
+        if (!currentW) return;
+        const n = `GridCraft_${currentW}x${currentH}.png`;
+        if (isAs && window.showSaveFilePicker) {
+            try {
+                const h = await window.showSaveFilePicker({ suggestedName: n, types: [{ accept: {'image/png': ['.png']} }] });
+                const w = await h.createWritable();
+                canvas.toBlob(async b => { await w.write(b); await w.close(); });
+            } catch(e) {}
+        } else {
+            const a = document.createElement('a'); a.download = n; a.href = canvas.toDataURL(); a.click();
+        }
+    }
+
+    // --- 算法核心保持不变 ---
+    function kmeans(p, k) {
+        let c = p.slice().sort(() => Math.random()-.5).slice(0,k);
+        for(let i=0; i<10; i++) {
+            let g = Array.from({length:k},()=>[]);
+            p.forEach(x => g[findNearestIndex(x,c)].push(x));
+            c = g.map((x,idx) => x.length ? [x.reduce((a,b)=>a+b[0],0)/x.length, x.reduce((a,b)=>a+b[1],0)/x.length, x.reduce((a,b)=>a+b[2],0)/x.length] : c[idx]);
+        }
+        return c;
+    }
+    function findNearestIndex(p, centers) {
+        let min = Infinity, idx = 0;
+        centers.forEach((c, i) => {
+            const d = Math.pow(p[0]-c[0],2)+Math.pow(p[1]-c[1],2)+Math.pow(p[2]-c[2],2);
+            if(d < min) { min = d; idx = i; }
+        });
+        return idx;
+    }
+</script>
+</body>
+</html>

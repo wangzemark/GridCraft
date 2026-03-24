@@ -1,0 +1,28 @@
+# --- 原始数据与中间产物 ---
+# 忽略原始的颜色列表 Excel 文件
+*.xlsx
+*.xls
+*.csv
+
+# --- 脚本与开发工具 ---
+# 忽略用于转换数据的 Python 脚本
+convert.py
+# 忽略 Python 自动生成的缓存文件夹
+__pycache__/
+*.pyc
+
+# --- 操作系统垃圾文件 ---
+# 忽略 Windows 缩略图缓存
+Thumbs.db
+# 忽略 macOS 的系统文件
+.DS_Store
+
+# --- 编辑器配置 ---
+# 如果你用 VS Code，忽略其配置文件夹
+.vscode/
+# 如果你用 PyCharm 或 WebStorm
+.idea/
+
+# --- 临时文件 ---
+*.tmp
+*.log
